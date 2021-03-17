@@ -11,7 +11,8 @@ __version__ = "1.1"
 __license__ = "BSD"
 __copyright__ = "Copyright 2013-2014, Luciano Fiandesio"
 __author__ = "Luciano Fiandesio <http://fiandes.io/> & John David Pressman <http://jdpressman.com>"
-
+import os
+import pdfkit
 import argparse
 import time
 import re
@@ -21,8 +22,10 @@ import urllib.parse as urlparse
 import json
 from bs4 import BeautifulSoup
 import requests
+from lxml import html
 from types import *
 import xml.etree.ElementTree as xml
+import tqdm
 
 HACKERNEWS = 'https://news.ycombinator.com'
 
@@ -34,8 +37,48 @@ parser.add_argument("-f", "--file", help="Filepath to store the JSON document at
 parser.add_argument("-n", "--number", default=1, type=int, help="Number of pages to grab, default 1. 0 grabs all pages.")
 parser.add_argument("-s", "--stories",  action="store_true", help="Grab stories only.")
 parser.add_argument("-c", "--comments", action="store_true", help="Grab comments only.")
-
+parser.add_argument("-pdf", "--pdf", default=1, type=bool, help="Save to PDF")
+parser.add_argument("-o", "--output_folder", default="output2/", type=str, help="Output Folder for PDF")
 arguments = parser.parse_args()
+
+
+def save_to_disk(formatted_dict, in_folder):
+    options = {
+        'quiet': ''
+    }
+    pbar = tqdm.tqdm(formatted_dict)
+    for e in pbar:
+        pbar.set_description("Processing %s" % e["title"])
+
+        folder = in_folder + e["title"] + "/"
+        if (not os.path.isdir(folder)):
+            os.mkdir(folder)
+        filename = e["title"] + '.pdf'
+        #ARTICLE
+        if not os.path.exists(folder+filename):
+            try:
+                pdfkit.from_url(e["url"], folder+filename, options=options)
+                #open(folder+filename, 'wb').write(pdf)
+            except:
+                print("Could not load url ", e["url"])
+
+        #Comments
+        if not os.path.exists(folder + "comments_" + filename):
+            url = "https://news.ycombinator.com/item?id=" + str(e["id"])
+            try:
+                pdfkit.from_url(url, folder + "comments_" + filename, options=options)
+                #open(folder + "comments_" + filename, 'wb').write(pdf)
+            except:
+                print("Could not load url ", url)
+
+
+        statinfo = os.stat(folder + filename)
+        if statinfo.st_size <= 2048:
+            #e.append(0)
+            print("\n--Error, empty file for ", e["url"])
+        #else:
+            #e.append(1)
+
 
 def getSavedStories(session, hnuser, page_range):
     """Return a list of story IDs representing your saved stories. 
@@ -47,7 +90,7 @@ def getSavedStories(session, hnuser, page_range):
     for page_index in page_range:
         saved = session.get(HACKERNEWS + '/upvoted?id=' + 
                             hnuser + "&p=" + str(page_index))
-        soup = BeautifulSoup(saved.content)
+        soup = BeautifulSoup(saved.content, features="lxml")
         for tag in soup.findAll('td',attrs={'class':'subtext'}):
             if tag.a is not type(None):
                 a_tags = tag.find_all('a')
@@ -68,7 +111,7 @@ def getSavedComments(session, hnuser, page_range):
     for page_index in page_range:
         saved = session.get(HACKERNEWS + '/upvoted?id=' + 
                             hnuser + "&comments=t" + "&p=" + str(page_index))
-        soup = BeautifulSoup(saved.content)
+        soup = BeautifulSoup(saved.content,features="lxml")
         for tag in soup.findAll('td',attrs={'class':'default'}):
             if tag.a is not type(None):
                 a_tags = tag.find_all('a')
@@ -108,7 +151,10 @@ def getHackerNewsItem(item_id):
     item_json_link = "https://hacker-news.firebaseio.com/v0/item/" + item_id + ".json"
     try:
         with urllib.request.urlopen(item_json_link) as item_json:
-            return json.loads(item_json.read().decode('utf-8'))
+            current_story = json.loads(item_json.read().decode('utf-8'))
+            if "kids" in current_story:
+                del current_story["kids"]
+            return current_story
     except urllib.error.URLError:
         return {"title":"Item " + item_id + " could not be retrieved",
                 "id":item_id}
@@ -116,7 +162,13 @@ def getHackerNewsItem(item_id):
 def item2stderr(item_id, item_count, item_total):
     sys.stderr.write("Got item " + item_id + ". ({} of {})\n".format(item_count,
                                                                      item_total))
-    
+def get_links(session, url):
+    print("Fetching", url)
+    response = session.get(url)
+    tree = html.fromstring(response.content)
+    morelink = tree.xpath('string(//a[@class="morelink"]/@href)')
+    return morelink
+
 def main():
     json_items = {"saved_stories":list(), "saved_comments":list()}
     if arguments.stories and arguments.comments:
@@ -125,15 +177,41 @@ def main():
         arguments.comments = False
     item_count = 0
     session = loginToHackerNews(arguments.username, arguments.password)
-    page_range = range(1, arguments.number + 1)
+    #if n = 0 -> Get the number of pages and parse them
+    nb_pages = arguments.number
+    if nb_pages == 0:
+        nb_pages = 1
+        morelink = get_links(session, 'https://news.ycombinator.com/upvoted?id=' + arguments.username)
+        while morelink:
+            morelink = get_links(session, "https://news.ycombinator.com/" + morelink)
+            nb_pages += 1
+
+    print('nb_pages ', nb_pages)
+
+    page_range = range(1, nb_pages + 1)
     if arguments.stories or (not arguments.stories and not arguments.comments):
+        print("Getting Stories as JSON")
         story_ids = getSavedStories(session,
                                     arguments.username,
                                     page_range)
-        for story_id in story_ids:
-            json_items["saved_stories"].append(getHackerNewsItem(story_id))
-            item_count += 1
-            item2stderr(story_id, item_count, len(story_ids))
+        pbar = tqdm.tqdm(story_ids)
+        for story_id in pbar:
+            should_analyse = True
+            #Load the previous json file and check if we already analysed it before
+            if os.path.exists(arguments.file) and os.stat(arguments.file).st_size != 0:
+                with open(arguments.file) as outfile:
+                    data = json.load(outfile)
+                    if "saved_stories" in data :
+                        for story in data["saved_stories"]:
+                            #print(stories)
+                            if story_id == str(story["id"]):
+                                #print("same")
+                                #pbar.set_description("Processing %s" % e[0])
+                                should_analyse = False
+                                json_items["saved_stories"].append(story)
+
+            if should_analyse:
+                json_items["saved_stories"].append(getHackerNewsItem(story_id))
     if arguments.comments or (not arguments.stories and not arguments.comments):
         item_count = 0
         comment_ids = getSavedComments(session,
@@ -145,9 +223,14 @@ def main():
             item2stderr(comment_id, item_count, len(comment_ids))
     if arguments.file:
         with open(arguments.file, 'w') as outfile:
-            json.dump(json_items, outfile)
-    else:
-        print(json.dumps(json_items))
+            json.dump(json_items, outfile, indent=4)
+
+    if arguments.pdf:
+        print("Exporting to PDF")
+        output_folder = arguments.output_folder
+        if (not os.path.isdir(output_folder)):
+            os.mkdir(output_folder)
+        save_to_disk(json_items["saved_stories"], output_folder)
 
 if __name__ == "__main__":
     main()
