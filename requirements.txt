@@ -1,0 +1,5 @@
+pdfkit
+requests
+tqdm
+bs4 
+lxml 
