@@ -154,6 +154,8 @@ def getHackerNewsItem(item_id):
             current_story = json.loads(item_json.read().decode('utf-8'))
             if "kids" in current_story:
                 del current_story["kids"]
+            #Escape / in name for a later use
+            current_story["title"] = current_story["title"].replace("/", "-")
             return current_story
     except urllib.error.URLError:
         return {"title":"Item " + item_id + " could not be retrieved",
