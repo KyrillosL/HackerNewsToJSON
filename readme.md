@@ -1,4 +1,4 @@
-# Hacker News to JSON #
+# Hacker News to PDF #
 
 Save 'saved stories' from a Hacker News account to a simple JSON format.
 
@@ -11,4 +11,4 @@ and modified for JSON output by John David Pressman.
 
 ## How to use ##
 
-`python hn2json.py [hn user] [hn password] -n [Number of pages to grab] -f [JSON filename]`
+`python hn2json.py [hn user] [hn password] -n [Number of pages to grab] -f [JSON filename] -pdf [0/1] -o [Output Folder]`
