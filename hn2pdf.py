@@ -50,11 +50,16 @@ def save_to_disk(formatted_dict, in_folder):
         filename = e["title"] + '.pdf'
         # ARTICLE
         if not os.path.exists(folder + filename):
-            try:
-                pdfkit.from_url(e["url"], folder + filename, options=options)
-                # open(folder+filename, 'wb').write(pdf)
-            except:
-                print("Could not load url ", e["url"])
+            if e['url'].endswith("pdf"):
+                response = requests.get(e['url'])
+                with open(folder + filename, 'wb') as f:
+                    f.write(response.content)
+            else:
+                try:
+                    pdfkit.from_url(e["url"], folder + filename, options=options)
+                    # open(folder+filename, 'wb').write(pdf)
+                except Exception as error:
+                    print("Could not load url ", e["url"], " error : ", error)
 
         # Comments
         if not os.path.exists(folder + "comments_" + filename):
@@ -65,12 +70,13 @@ def save_to_disk(formatted_dict, in_folder):
             except:
                 print("Could not load url ", url)
 
-        statinfo = os.stat(folder + filename)
-        if statinfo.st_size <= 2048:
-            # e.append(0)
+        if not os.path.exists(folder + filename):
             print("\n--Error, empty file for ", e["url"])
-        # else:
-        # e.append(1)
+        else:
+            statinfo = os.stat(folder + filename)
+            if statinfo.st_size <= 2048:
+                # e.append(0)
+                print("\n--Error, empty file for ", e["url"])
 
 
 def getSavedStories(session, hnuser, page_range):
