@@ -10,4 +10,7 @@ Originally developed on iPad by Luciano Fiandesio with the awesome Pythonista (h
 
 ## How to use ##
 
-`python hn2json.py [hn user] [hn password] -n [Number of pages to grab] -f [JSON filename] -pdf [0/1] -o [Output Folder]`
+`python hn2pdf.py [hn user] [hn password] -f [JSON filename] -pdf [0/1] -o [Output Folder]`
+
+``OPTIONAL : -n [Number of pages to grab], nothing = all pages` 
+
